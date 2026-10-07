@@ -1,0 +1,7 @@
+# 项目数据 / 本地配置（含密钥，勿提交）
+.codebuddy/
+config/
+
+# 本地测试/演示产物
+church_*.png
+*.tmp

@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>建筑透视校正 · 自动 + 引导线 + 参数面板</title>
+<style>
+  :root{
+    --bg:#0f1420; --panel:#1a2233; --panel-2:#222c42; --accent:#4f9dff;
+    --accent-2:#36d399; --warn:#ffd166; --danger:#ff6b6b; --text:#e7ecf5; --muted:#9aa6bd; --line:#2c3850;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    background:linear-gradient(160deg,#0c111c,#101725);color:var(--text);}
+  .app{display:flex;flex-direction:column;min-height:100vh;}
+  header{padding:12px 16px 8px;border-bottom:1px solid var(--line);}
+  header h1{margin:0;font-size:17px;letter-spacing:.3px;}
+  header p{margin:5px 0 0;color:var(--muted);font-size:12px;line-height:1.55;}
+  .badge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;background:#23304a;color:var(--muted);margin-left:6px;}
+  main{flex:1 1 auto;overflow-y:auto;-webkit-overflow-scrolling:touch;
+    padding:12px 14px 146px;max-width:1100px;margin:0 auto;width:100%;}
+  .statusbar{position:sticky;top:0;z-index:5;background:rgba(16,23,37,.92);
+    border:1px solid var(--line);border-radius:9px;padding:8px 12px;font-size:12.5px;
+    color:var(--muted);margin-bottom:10px;}
+  .statusbar.ok{color:var(--accent-2);border-color:#1f5a44;}
+  .statusbar.warn{color:var(--warn);border-color:#5a4a1f;}
+  .statusbar.err{color:var(--danger);border-color:#5a2222;}
+  button{border:1px solid var(--line);background:var(--panel-2);color:var(--text);
+    padding:9px 12px;border-radius:10px;font-size:13.5px;cursor:pointer;transition:.15s;white-space:nowrap;}
+  button:hover:not(:disabled){border-color:var(--accent);}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#06101f;font-weight:600;}
+  button.success{background:var(--accent-2);border-color:var(--accent-2);color:#062012;font-weight:600;}
+  button.active{background:var(--accent);border-color:var(--accent);color:#06101f;font-weight:600;}
+  button:disabled{opacity:.4;cursor:not-allowed;}
+  .chk{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:13px;user-select:none;cursor:pointer;}
+  .drop{border:2px dashed var(--line);border-radius:14px;padding:34px 18px;text-align:center;
+    color:var(--muted);background:var(--panel);cursor:pointer;transition:.15s;}
+  .drop.drag{border-color:var(--accent);background:#16243c;color:var(--text);}
+  .drop strong{color:var(--text);}
+  .viewbar{display:flex;gap:6px;margin:4px 0 10px;}
+  .viewbar button{flex:1;font-size:13px;padding:9px 8px;}
+  .hero{display:flex;align-items:center;justify-content:center;min-height:44vh;}
+  .canvas-box{position:relative;width:100%;background:repeating-conic-gradient(#1b2333 0% 25%,#161d2b 0% 50%) 50%/22px 22px;
+    border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;align-items:center;justify-content:center;padding:6px;}
+  canvas{display:block;max-width:100%;max-height:62vh;touch-action:none;}
+  #editCanvas.drawing{cursor:crosshair;}
+  .modes{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;}
+  .modes button{font-size:13px;padding:9px 12px;}
+  .hint{margin-top:8px;font-size:12px;color:var(--muted);line-height:1.7;}
+  .hint b{color:var(--accent);}
+  .hint .vb{color:#5aa9ff;} .hint .hb{color:#36d399;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;margin-top:12px;}
+  .card h3{margin:0 0 10px;font-size:13.5px;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:8px;}
+  /* 底部固定工具条 */
+  .bottombar{position:fixed;left:0;right:0;bottom:0;z-index:40;
+    display:flex;flex-direction:column;gap:7px;
+    padding:8px 10px calc(8px + env(safe-area-inset-bottom));
+    background:rgba(14,20,33,.95);border-top:1px solid var(--line);backdrop-filter:blur(8px);}
+  .barrow{display:flex;gap:7px;justify-content:center;width:100%;}
+  .barrow button{flex:1 1 0;min-width:0;padding:9px 6px;font-size:13px;}
+  .bottombar .chk{flex:1 1 0;justify-content:center;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:9px 8px;}
+  .hidden{display:none!important;}
+  .loading{position:fixed;inset:0;background:rgba(8,12,20,.8);display:flex;align-items:center;
+    justify-content:center;flex-direction:column;gap:14px;z-index:60;color:var(--text);}
+  .spinner{width:42px;height:42px;border-radius:50%;border:4px solid var(--line);
+    border-top-color:var(--accent);animation:spin 1s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  /* 参数面板（可折叠） */
+  .panel-head{background:none;border:none;color:var(--text);font-size:14px;font-weight:600;padding:0;cursor:pointer;width:100%;text-align:left;}
+  .sliders{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px 22px;margin-top:8px;}
+  .sl{display:flex;flex-direction:column;gap:5px;}
+  .sl .row{display:flex;justify-content:space-between;font-size:12.5px;color:var(--muted);}
+  .sl .row b{color:var(--text);font-weight:600;}
+  .sl input[type=range]{width:100%;accent-color:var(--accent);}
+  .panel-foot{display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap;}
+  .tiny{font-size:11.5px;color:var(--muted);}
+  @media(max-width:600px){ header p{display:none;} }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>建筑透视校正 <span class="badge">自动 · 引导线 · 参数</span></h1>
+    <p>针对建筑/风光的透视歪斜：自动校正，不满意就在图上<b>画引导线</b>，或调<b>参数</b>微调。实时预览，导出原图分辨率。</p>
+  </header>
+
+  <main>
+    <div id="status" class="statusbar">请先上传一张图片</div>
+
+    <div id="drop" class="drop">
+      点下方「上传」选图，或把图片拖到这里<br />
+      <span style="font-size:12px">适合建筑 / 风光 / 室内等存在“透视歪斜、竖线汇聚”的画面</span>
+    </div>
+
+    <div id="stage" class="hidden">
+      <div class="viewbar">
+        <button id="btnViewResult" class="active">校正结果</button>
+        <button id="btnViewOrig">原图 · 引导线</button>
+      </div>
+      <div class="hero">
+        <div class="canvas-box" id="boxResult"><canvas id="resultCanvas"></canvas></div>
+        <div class="canvas-box hidden" id="boxEdit"><canvas id="editCanvas"></canvas></div>
+      </div>
+      <div class="hint">
+        点 <span class="vb">↕ 画竖直线</span> 后沿大楼竖直边拖动画线（≥2 条）；<span class="hb">↔ 画水平线</span> 沿应水平的边画。画完<b>立即</b>校正。
+        切到「原图·引导线」可勾选看算法识别的边缘。不满意再用底部<b>参数</b>微调。
+      </div>
+    </div>
+
+    <div id="paramCard" class="card hidden">
+      <button id="paramToggle" class="panel-head">③ 校正参数微调 ▸</button>
+      <div id="paramBody" class="hidden">
+        <div class="sliders">
+          <div class="sl"><div class="row"><span>垂直 Vertical（仰/俯）</span><b id="vPitch">0.0°</b></div>
+            <input id="sPitch" type="range" min="-40" max="40" step="0.1" value="0"></div>
+          <div class="sl"><div class="row"><span>水平 Horizontal（左右）</span><b id="vYaw">0.0°</b></div>
+            <input id="sYaw" type="range" min="-40" max="40" step="0.1" value="0"></div>
+          <div class="sl"><div class="row"><span>旋转 Rotate（摆正）</span><b id="vRoll">0.0°</b></div>
+            <input id="sRoll" type="range" min="-45" max="45" step="0.1" value="0"></div>
+          <div class="sl"><div class="row"><span>透视强度 FOV（焦距）</span><b id="vFov">50°</b></div>
+            <input id="sFov" type="range" min="20" max="110" step="1" value="50"></div>
+          <div class="sl"><div class="row"><span>缩放 Scale</span><b id="vScale">100%</b></div>
+            <input id="sScale" type="range" min="50" max="200" step="1" value="100"></div>
+          <div class="sl"><div class="row"><span>纵横比 Aspect</span><b id="vAspect">100%</b></div>
+            <input id="sAspect" type="range" min="50" max="200" step="1" value="100"></div>
+        </div>
+        <div class="panel-foot">
+          <button id="btnResetParams">↺ 重置参数</button>
+          <span class="tiny">垂直/水平即“相机俯仰与偏航”校正；数值由自动或引导线给出后可再手动微调。</span>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <nav class="bottombar">
+    <div class="barrow hidden" id="toolsRow">
+      <button id="btnModeV">↕ 画<b style="color:#5aa9ff">竖</b>线</button>
+      <button id="btnModeH">↔ 画<b style="color:#36d399">横</b>线</button>
+      <button id="btnUndo">↩ 撤销</button>
+      <button id="btnClearLines">🗑 清除</button>
+    </div>
+    <div class="barrow">
+      <button id="btnUpload" class="primary">📁 上传</button>
+      <button id="btnAuto" disabled>✨ 自动校正</button>
+      <label class="chk"><input id="chkLines" type="checkbox" /> 检测线</label>
+      <button id="btnParams">🎚 参数</button>
+      <button id="btnDownload" class="success" disabled>⬇ 下载</button>
+    </div>
+    <input id="file" type="file" accept="image/*" class="hidden" />
+  </nav>
+
+<div id="loading" class="loading hidden">
+  <div class="spinner"></div>
+  <div id="loadingText">正在加载图像处理引擎…</div>
+</div>
+
+<script>
+/* ================= 全局状态 ================= */
+let cvReady=false;
+let previewCanvas=null, W=0, H=0;      // 预览图(≤1000)，所有交互坐标基准
+let origCanvas=null, origW=0, origH=0; // 原图全分辨率，仅导出用
+let lastSegs=[];                       // 最近一次检测到的线段
+let vLines=[], hLines=[];              // 用户画的引导线(预览坐标)
+let mode='none';                       // none | v | h
+let drawing=false, curLine=null;       // 正在画的线
+let editScale=1, lastH=null, warpSched=false;
+let view='result';                     // result | orig（主视图：校正结果 / 原图引导线）
+const MAX_PREVIEW=1000;
+
+const els={
+  file:document.getElementById('file'), btnUpload:document.getElementById('btnUpload'),
+  btnAuto:document.getElementById('btnAuto'), btnDownload:document.getElementById('btnDownload'),
+  chkLines:document.getElementById('chkLines'), drop:document.getElementById('drop'),
+  stage:document.getElementById('stage'), paramCard:document.getElementById('paramCard'),
+  edit:document.getElementById('editCanvas'), result:document.getElementById('resultCanvas'),
+  status:document.getElementById('status'), loading:document.getElementById('loading'),
+  loadingText:document.getElementById('loadingText'),
+  boxResult:document.getElementById('boxResult'), boxEdit:document.getElementById('boxEdit'),
+  toolsRow:document.getElementById('toolsRow'),
+  btnViewResult:document.getElementById('btnViewResult'), btnViewOrig:document.getElementById('btnViewOrig'),
+  paramCard:document.getElementById('paramCard'), paramToggle:document.getElementById('paramToggle'),
+  paramBody:document.getElementById('paramBody'), btnParams:document.getElementById('btnParams'),
+  btnModeV:document.getElementById('btnModeV'), btnModeH:document.getElementById('btnModeH'),
+  btnUndo:document.getElementById('btnUndo'), btnClearLines:document.getElementById('btnClearLines'),
+  btnResetParams:document.getElementById('btnResetParams'),
+  sPitch:document.getElementById('sPitch'), sYaw:document.getElementById('sYaw'), sRoll:document.getElementById('sRoll'),
+  sFov:document.getElementById('sFov'), sScale:document.getElementById('sScale'), sAspect:document.getElementById('sAspect'),
+  vPitch:document.getElementById('vPitch'), vYaw:document.getElementById('vYaw'), vRoll:document.getElementById('vRoll'),
+  vFov:document.getElementById('vFov'), vScale:document.getElementById('vScale'), vAspect:document.getElementById('vAspect'),
+};
+const setStatus=(m,k)=>{els.status.textContent=m;els.status.className='statusbar'+(k?(' '+k):'');};
+const showLoading=t=>{els.loadingText.textContent=t;els.loading.classList.remove('hidden');};
+const hideLoading=()=>els.loading.classList.add('hidden');
+
+/* ================= OpenCV 加载 ================= */
+function onCvReady(){cvReady=true;setStatus('引擎就绪，可上传图片','ok');}
+(function loadOpenCV(){
+  const waitReady=()=>{
+    const t=setInterval(()=>{ if(cv&&cv.getPerspectiveTransform){clearInterval(t);onCvReady();hideLoading();} },150);
+    setTimeout(()=>{ if(!cvReady){clearInterval(t);hideLoading();setStatus('引擎加载较慢，请刷新页面','warn');} },20000);
+  };
+  const loadFrom=(src,onErr)=>{
+    showLoading('正在加载图像处理引擎…');
+    const s=document.createElement('script'); s.src=src;
+    s.onload=waitReady;
+    s.onerror=()=>{ if(onErr) onErr(); else {hideLoading();setStatus('无法加载 OpenCV，请检查网络','err');} };
+    document.head.appendChild(s);
+  };
+  loadFrom('opencv.js', ()=> loadFrom('https://docs.opencv.org/4.x/opencv.js', null));
+})();
+
+/* ================= 线性代数 / 几何 ================= */
+const D2R=Math.PI/180, R2D=180/Math.PI;
+const fitDims=(w,h,mw,mh)=>{const r=Math.min(mw/w,mh/h,1);return{w:Math.round(w*r),h:Math.round(h*r)};};
+function matmul(A,B){const C=[[0,0,0],[0,0,0],[0,0,0]];for(let i=0;i<3;i++)for(let j=0;j<3;j++)for(let k=0;k<3;k++)C[i][j]+=A[i][k]*B[k][j];return C;}
+function transpose(m){return[[m[0][0],m[1][0],m[2][0]],[m[0][1],m[1][1],m[2][1]],[m[0][2],m[1][2],m[2][2]]];}
+function invert3(m){
+  const a=m[0][0],b=m[0][1],c=m[0][2],d=m[1][0],e=m[1][1],f=m[1][2],g=m[2][0],h=m[2][1],i=m[2][2];
+  const A=e*i-f*h,B=-(d*i-f*g),C=d*h-e*g,det=a*A+b*B+c*C;
+  if(Math.abs(det)<1e-12)return null;const id=1/det;
+  return[[A*id,(c*h-b*i)*id,(b*f-c*e)*id],[B*id,(a*i-c*g)*id,(c*d-a*f)*id],[C*id,(b*g-a*h)*id,(a*e-b*d)*id]];
+}
+function applyH3(M,x,y){const u=M[0][0]*x+M[0][1]*y+M[0][2],v=M[1][0]*x+M[1][1]*y+M[1][2],w=M[2][0]*x+M[2][1]*y+M[2][2];
+  const ww=Math.abs(w)<1e-9?(w<0?-1e-9:1e-9):w;return[u/ww,v/ww];}
+function norm3(v){const m=Math.hypot(v[0],v[1],v[2])||1;return[v[0]/m,v[1]/m,v[2]/m];}
+function cross3v(a,b){return[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];}
+// 相机内参（像素）
+function Kof(w,h,fovDeg){const f=(w/2)/Math.tan(fovDeg*D2R/2);return[[f,0,w/2],[0,f,h/2],[0,0,1]];}
+// 旋转矩阵 R = Rz(roll)·Ry(yaw)·Rx(pitch)
+function rotX(t){const c=Math.cos(t),s=Math.sin(t);return[[1,0,0],[0,c,-s],[0,s,c]];}
+function rotY(t){const c=Math.cos(t),s=Math.sin(t);return[[c,0,s],[0,1,0],[-s,0,c]];}
+function rotZ(t){const c=Math.cos(t),s=Math.sin(t);return[[c,-s,0],[s,c,0],[0,0,1]];}
+function Rof(pitch,yaw,roll){return matmul(matmul(rotZ(roll),rotY(yaw)),rotX(pitch));}
+function anglesFromR(R){
+  const yaw=Math.asin(Math.max(-1,Math.min(1,-R[2][0])));
+  const pitch=Math.atan2(R[2][1],R[2][2]);
+  const roll=Math.atan2(R[1][0],R[0][0]);
+  return{pitch:pitch*R2D,yaw:yaw*R2D,roll:roll*R2D};
+}
+// 灭点 → 归一化方向（相机系）
+function dirFromVP(p,Ki){return norm3([Ki[0][0]*p.x+Ki[0][1]*p.y+Ki[0][2],Ki[1][0]*p.x+Ki[1][1]*p.y+Ki[1][2],Ki[2][0]*p.x+Ki[2][1]*p.y+Ki[2][2]]);}
+function RfromCols(dh,dv){const dz=cross3v(dh,dv);return[[dh[0],dv[0],dz[0]],[dh[1],dv[1],dz[1]],[dh[2],dv[2],dz[2]]];}
+function rotMag(R){const tr=R[0][0]+R[1][1]+R[2][2];return Math.acos(Math.max(-1,Math.min(1,(tr-1)/2)));}
+// 由灭点反推相机旋转 R（自动选择符号，使旋转最小 → 避免整体翻转）
+function RfromVPs(vV,vH,K){
+  const Ki=invert3(K); if(!Ki)return null;
+  const dv0=dirFromVP(vV,Ki);
+  if(!vH){                                   // 仅竖线：水平方向取与竖线正交且指向 +x，竖线指向 +y(向下)
+    let dv=dv0.slice(); if(dv[1]<0)dv=[-dv[0],-dv[1],-dv[2]];
+    let dh=norm3(cross3v(dv,[0,0,1])); if(dh[0]<0)dh=[-dh[0],-dh[1],-dh[2]];
+    const d=dh[0]*dv[0]+dh[1]*dv[1]+dh[2]*dv[2]; dh=norm3([dh[0]-d*dv[0],dh[1]-d*dv[1],dh[2]-d*dv[2]]);
+    return RfromCols(dh,dv);
+  }
+  const dh0=dirFromVP(vH,Ki);
+  let best=null,bestMag=Infinity;
+  for(const av of[1,-1])for(const ah of[1,-1]){
+    let a=norm3([dv0[0]*av,dv0[1]*av,dv0[2]*av]);
+    let b=norm3([dh0[0]*ah,dh0[1]*ah,dh0[2]*ah]);
+    const d=b[0]*a[0]+b[1]*a[1]+b[2]*a[2]; b=norm3([b[0]-d*a[0],b[1]-d*a[1],b[2]-d*a[2]]);
+    const R=RfromCols(b,a), mag=rotMag(R);
+    if(mag<bestMag){bestMag=mag;best=R;}
+  }
+  return best;
+}
+// 仅水平灭点（无竖线）：构造 R（水平指向 +x）
+function RfromSingleH(vH,K){
+  const Ki=invert3(K); if(!Ki)return null;
+  let dh=dirFromVP(vH,Ki); if(dh[0]<0)dh=[-dh[0],-dh[1],-dh[2]];
+  let dv=norm3(cross3v([0,0,1],dh));
+  const d=dh[0]*dv[0]+dh[1]*dv[1]+dh[2]*dv[2]; dh=norm3([dh[0]-d*dv[0],dh[1]-d*dv[1],dh[2]-d*dv[2]]);
+  return RfromCols(dh,dv);
+}
+// 校正单应 H = K·Rᵀ·K⁻¹
+function HfromR(R,fov){
+  const K=Kof(W,H,fov), Ki=invert3(K);
+  return{ Hc:matmul(matmul(K,transpose(R)),Ki), K };
+}
+// 直线交点
+function lineInter(l1,l2){const det=l1.a*l2.b-l2.a*l1.b; if(Math.abs(det)<1e-9)return null;
+  return{x:(l1.b*l2.c-l2.b*l1.c)/det, y:(l1.c*l2.a-l2.c*l1.a)/det};}
+// 兼容两种入参：数组 [x1,y1,x2,y2]（detectLines 产出）与对象 {x1,y1,x2,y2}（引导线）
+// （修复：原实现只取 s.x1/s.y1…，而 autoCorrect 传的是数组 → 全 NaN，导致 robustVP 恒返回 null、透视灭点校正从未生效）
+function seg2line(s){const x1=(s.x1!==undefined?s.x1:s[0]),y1=(s.y1!==undefined?s.y1:s[1]),
+  x2=(s.x2!==undefined?s.x2:s[2]),y2=(s.y2!==undefined?s.y2:s[3]);
+  const dx=x2-x1,dy=y2-y1,L=Math.hypot(dx,dy)||1;
+  const a=-dy/L,b=dx/L;return{a,b,c:-(a*x1+b*y1),mx:(x1+x2)/2,my:(y1+y2)/2,dx,dy,L};}
+function lsVP(lines){let A00=0,A01=0,A11=0,B0=0,B1=0;
+  for(const L of lines){A00+=L.a*L.a;A01+=L.a*L.b;A11+=L.b*L.b;B0+=-L.a*L.c;B1+=-L.b*L.c;}
+  const det=A00*A11-A01*A01; if(Math.abs(det)<1e-9)return null;
+  return{x:(A11*B0-A01*B1)/det,y:(A00*B1-A01*B0)/det};}
+
+/* ================= 线段检测 + 稳健灭点 ================= */
+function detectLines(){
+  const src=cv.imread(previewCanvas);
+  const gray=new cv.Mat(), blur=new cv.Mat(), edges=new cv.Mat();
+  cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY);
+  cv.GaussianBlur(gray,blur,new cv.Size(5,5),0);
+  cv.Canny(blur,edges,40,120);
+  let segs=[];
+  const grab=(thr,minLen,gap)=>{
+    try{
+      const lines=new cv.Mat();
+      cv.HoughLinesP(edges,lines,1,Math.PI/180,thr,minLen,gap);
+      const d=lines.data32S,n=lines.rows*lines.cols;
+      for(let i=0;i<n;i++){const x1=d[i*4],y1=d[i*4+1],x2=d[i*4+2],y2=d[i*4+3];
+        if(Math.hypot(x2-x1,y2-y1)>W*0.04)segs.push([x1,y1,x2,y2]);}
+      lines.delete();
+    }catch(e){}
+  };
+  grab(Math.round(H*0.12),W*0.06,W*0.04);   // 主检测：中等阈值，结构线
+  if(segs.length<30) grab(Math.round(H*0.06),W*0.10,W*0.05);  // 补充：更松，捕获更长线
+  src.delete();gray.delete();blur.delete();edges.delete();
+  return segs;
+}
+function segAngle(s){const a=Math.abs(Math.atan2(s[3]-s[1],s[2]-s[0])*R2D);return a;}
+// RANSAC 稳健估计灭点
+function robustVP(lines,angTolDeg){
+  if(lines.length<2)return null;
+  const tol=angTolDeg*D2R; let best=null;
+  const iters=Math.min(600,40*lines.length);
+  for(let it=0;it<iters;it++){
+    const i=(Math.random()*lines.length)|0, j=(Math.random()*lines.length)|0;
+    if(i===j)continue;
+    const v=lineInter(lines[i],lines[j]); if(!v)continue;
+    if(!isFinite(v.x)||!isFinite(v.y))continue;
+    let cnt=0;
+    for(const L of lines){
+      const dx=v.x-L.mx,dy=v.y-L.my,n2=Math.hypot(dx,dy)||1e-9;
+      let cos=Math.abs((L.dx*dx+L.dy*dy)/(L.L*n2)); cos=Math.min(1,cos);
+      if(Math.acos(cos)<tol)cnt++;
+    }
+    if(!best||cnt>best.cnt)best={v,cnt};
+  }
+  if(!best)return null;
+  const inl=lines.filter(L=>{const dx=best.v.x-L.mx,dy=best.v.y-L.my,n2=Math.hypot(dx,dy)||1e-9;
+    let cos=Math.abs((L.dx*dx+L.dy*dy)/(L.L*n2));cos=Math.min(1,cos);return Math.acos(cos)<tol;});
+  const fine=lsVP(inl)||best.v;
+  return{v:fine,count:inl.length,total:lines.length};
+}
+// 稳健 1D 滚转估计：滑窗找“主流方向”，对窗框/斜楼边等少量离群线不敏感
+// （修复：原用原始中位，浏览器抽到的线段集合一旦被几条略偏的线带偏，
+//  中位就会落到 ±1°，而守卫只拦 |中位|<=0.3°，导致近竖直图被误转 1°）
+function robustRoll(devs){
+  if(!devs||devs.length<2)return null;
+  let best={cnt:-1,mean:0};
+  for(const c of devs){
+    let cnt=0,sum=0;
+    for(const d of devs){ if(Math.abs(d-c)<=0.5){cnt++;sum+=d;} }
+    if(cnt>best.cnt)best={cnt,mean:sum/cnt};
+  }
+  return{ roll:best.mean, consensus:best.cnt/devs.length };
+}
+
+/* ================= 参数读取 / 渲染 ================= */
+function readParams(){
+  return{
+    pitch:parseFloat(els.sPitch.value), yaw:parseFloat(els.sYaw.value), roll:parseFloat(els.sRoll.value),
+    fov:parseFloat(els.sFov.value), scale:parseFloat(els.sScale.value)/100, aspect:parseFloat(els.sAspect.value)/100,
+  };
+}
+function setParams(p){
+  if(p.pitch!==undefined)els.sPitch.value=Math.max(-40,Math.min(40,p.pitch));
+  if(p.yaw!==undefined)els.sYaw.value=Math.max(-40,Math.min(40,p.yaw));
+  if(p.roll!==undefined)els.sRoll.value=Math.max(-45,Math.min(45,p.roll));
+  syncParamLabels();
+}
+function syncParamLabels(){
+  els.vPitch.textContent=(+els.sPitch.value).toFixed(1)+'°';
+  els.vYaw.textContent=(+els.sYaw.value).toFixed(1)+'°';
+  els.vRoll.textContent=(+els.sRoll.value).toFixed(1)+'°';
+  els.vFov.textContent=els.sFov.value+'°';
+  els.vScale.textContent=els.sScale.value+'%';
+  els.vAspect.textContent=els.sAspect.value+'%';
+}
+// 计算最终单应（预览坐标系）与输出尺寸
+function computeH(){
+  const p=readParams();
+  const K=Kof(W,H,p.fov), Ki=invert3(K);
+  const R=Rof(p.pitch*D2R,p.yaw*D2R,p.roll*D2R);
+  const Hc=matmul(matmul(K,transpose(R)),Ki);
+  const cs=[[0,0],[W,0],[W,H],[0,H]].map(([x,y])=>applyH3(Hc,x,y));
+  const xs=cs.map(c=>c[0]),ys=cs.map(c=>c[1]);
+  const minx=Math.min(...xs),miny=Math.min(...ys),maxx=Math.max(...xs),maxy=Math.max(...ys);
+  const bw=maxx-minx,bh=maxy-miny;
+  if(!(bw>1&&bh>1))return null;
+  const sx=p.scale*p.aspect, sy=p.scale;
+  const ow=Math.max(2,Math.round(bw*sx)), oh=Math.max(2,Math.round(bh*sy));
+  const S=[[sx,0,0],[0,sy,0],[0,0,1]], T=[[1,0,-minx],[0,1,-miny],[0,0,1]];
+  const Hf=matmul(S,matmul(T,Hc));
+  return{Hf,ow,oh,K};
+}
+// 自动裁剪黑边：warp 后越界像素填为透明(alpha=0)，据此找前景包围盒裁掉黑边
+function autoCrop(src){
+  const ch=src.channels(); let mask=new cv.Mat();
+  if(ch===4){
+    const mv=new cv.MatVector(); cv.split(src,mv);
+    cv.threshold(mv.get(3),mask,0,255,cv.THRESH_BINARY); mv.delete();
+  }else{
+    const g=new cv.Mat();
+    cv.cvtColor(src,g,ch===3?cv.COLOR_RGB2GRAY:cv.COLOR_RGBA2GRAY);
+    cv.threshold(g,mask,8,255,cv.THRESH_BINARY); g.delete();
+  }
+  const rect=cv.boundingRect(mask); mask.delete();
+  if(rect.width>=src.cols&&rect.height>=src.rows)return{mat:src.clone(),cropped:false};
+  const c=src.roi(rect).clone(); return{mat:c,cropped:true};
+}
+// 高质量插值：优先 LANCZOS4（8x8 锐利），OpenCV.js 未暴露时退回 CUBIC
+const interpGood=()=>cv.INTER_LANCZOS4!==undefined?cv.INTER_LANCZOS4:cv.INTER_CUBIC;
+// 预览渲染（所见即所得：与导出一致的插值 + 自动裁边）
+function renderPreview(){
+  if(!cvReady||!previewCanvas)return;
+  const r=computeH(); if(!r)return; lastH=r;
+  const src=cv.imread(previewCanvas),dst=new cv.Mat();
+  const Hm=cv.matFromArray(3,3,cv.CV_64FC1,r.Hf.flat());
+  cv.warpPerspective(src,dst,Hm,new cv.Size(r.ow,r.oh),interpGood(),cv.BORDER_CONSTANT,new cv.Scalar());
+  const crop=autoCrop(dst); dst.delete();
+  cv.imshow(els.result,crop.mat); crop.mat.delete();Hm.delete();src.delete();
+}
+function scheduleWarp(){if(warpSched)return;warpSched=true;requestAnimationFrame(()=>{warpSched=false;renderPreview();});}
+
+/* ================= 编辑画布渲染（含引导线） ================= */
+function drawEdit(){
+  if(!previewCanvas)return;
+  const disp=fitDims(W,H,600,540);
+  els.edit.width=disp.w;els.edit.height=disp.h;editScale=disp.w/W;
+  const ctx=els.edit.getContext('2d');ctx.clearRect(0,0,disp.w,disp.h);
+  ctx.drawImage(previewCanvas,0,0,disp.w,disp.h);
+  if(els.chkLines.checked&&lastSegs.length){
+    ctx.lineWidth=1;ctx.strokeStyle='rgba(255,209,102,0.5)';
+    for(const[x1,y1,x2,y2]of lastSegs){ctx.beginPath();
+      ctx.moveTo(x1*editScale,y1*editScale);ctx.lineTo(x2*editScale,y2*editScale);ctx.stroke();}
+  }
+  const drawSet=(arr,color,label)=>{
+    ctx.lineWidth=2.5;ctx.strokeStyle=color;ctx.setLineDash([]);
+    for(const L of arr){
+      const x1=L.x1*editScale,y1=L.y1*editScale,x2=L.x2*editScale,y2=L.y2*editScale;
+      ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+      ctx.fillStyle=color;
+      [[x1,y1],[x2,y2]].forEach(([x,y])=>{ctx.beginPath();ctx.arc(x,y,5,0,Math.PI*2);ctx.fill();
+        ctx.lineWidth=1.5;ctx.strokeStyle='#fff';ctx.stroke();ctx.strokeStyle=color;ctx.lineWidth=2.5;});
+    }
+  };
+  drawSet(vLines,'#5aa9ff'); drawSet(hLines,'#36d399');
+  if(curLine){
+    const c=(mode==='v')?'#5aa9ff':'#36d399';
+    ctx.lineWidth=2.5;ctx.strokeStyle=c;ctx.setLineDash([6,4]);
+    ctx.beginPath();ctx.moveTo(curLine.x1*editScale,curLine.y1*editScale);
+    ctx.lineTo(curLine.x2*editScale,curLine.y2*editScale);ctx.stroke();ctx.setLineDash([]);
+  }
+}
+
+/* ================= 载入图片 ================= */
+function loadImageFile(file){
+  if(!file||!file.type.startsWith('image/')){setStatus('请选择图片文件','warn');return;}
+  showLoading('正在读取图片…');
+  const img=new Image();
+  img.onload=()=>{ try{
+    origW=img.naturalWidth;origH=img.naturalHeight;
+    origCanvas=document.createElement('canvas');origCanvas.width=origW;origCanvas.height=origH;
+    origCanvas.getContext('2d',{willReadFrequently:true}).drawImage(img,0,0,origW,origH);
+    const dim=fitDims(origW,origH,MAX_PREVIEW,MAX_PREVIEW);
+    W=dim.w;H=dim.h;
+    previewCanvas=document.createElement('canvas');previewCanvas.width=W;previewCanvas.height=H;
+    previewCanvas.getContext('2d',{willReadFrequently:true}).drawImage(img,0,0,W,H);
+    vLines=[];hLines=[];lastSegs=[];mode='none';
+    els.stage.classList.remove('hidden');els.paramCard.classList.remove('hidden');els.drop.classList.add('hidden');
+    els.toolsRow.classList.remove('hidden');
+    els.btnAuto.disabled=!cvReady;els.btnDownload.disabled=false;
+    els.paramBody.classList.add('hidden');els.paramToggle.textContent='③ 校正参数微调 ▸';
+    setMode('none');setView('result');resetParams();drawEdit();renderPreview();hideLoading();
+    setStatus('图片已载入：点「自动校正」，或画引导线 / 调参数面板','ok');
+  }catch(e){console.error('ONLOAD_ERR',(e&&e.stack)||e); setStatus('载入出错：'+(e&&e.message||e),'err'); hideLoading();}
+  };
+  img.onerror=()=>{hideLoading();setStatus('图片读取失败','err');};
+  img.src=URL.createObjectURL(file);
+}
+function resetParams(){
+  els.sPitch.value=0;els.sYaw.value=0;els.sRoll.value=0;els.sFov.value=50;els.sScale.value=100;els.sAspect.value=100;
+  syncParamLabels();
+}
+
+/* ================= 自动校正（稳健） ================= */
+function autoCorrect(){
+  if(!cvReady||!previewCanvas){setStatus('引擎未就绪','warn');return;}
+  showLoading('正在检测线条与灭点…');
+  setTimeout(()=>{
+    try{
+      const segs=detectLines();lastSegs=segs;
+      if(segs.length<6){setStatus('画面边缘太少，难自动识别，请手动画引导线','warn');drawEdit();hideLoading();return;}
+      // 窄角度聚类：只认真正的建筑竖/横线，铁轨斜段被排除（关键修复）
+      const vC=segs.filter(s=>{const a=segAngle(s);return a>78&&a<102;});
+      const hC=segs.filter(s=>{const a=segAngle(s);return a<12||a>168;});
+      if(vC.length<4&&hC.length<4){setStatus('可靠的竖/横线太少，请手动画引导线','warn');drawEdit();hideLoading();return;}
+      const fov=parseFloat(els.sFov.value), K=Kof(W,H,fov);
+      const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+      const devOf=(s,vert)=>{let a=Math.atan2(s[3]-s[1],s[2]-s[0])*R2D; a=((a%180)+180)%180; return vert?(a-90):(a>90?a-180:a);};
+      const med=a=>{if(!a.length)return 0; const b=a.slice().sort((x,y)=>x-y); return b[b.length>>1];};
+      const spr=a=>a.length?a[a.length-1]-a[0]:999;
+      const vDev=vC.map(s=>devOf(s,true)).sort((x,y)=>x-y);
+      const hDev=hC.map(s=>devOf(s,false)).sort((x,y)=>x-y);
+      const vMed=med(vDev), vSp=spr(vDev), hMed=med(hDev), hSp=spr(hDev);
+      let applied=false;
+      // 路径A：竖线明显汇聚（真透视）→ VP/相机姿态
+      if(vC.length>=4 && vSp>10){
+        const rv=robustVP(vC.map(seg2line),4);
+        const vOK=rv&&rv.count>=4&&rv.count/rv.total>=0.5;
+        const rh=hC.length>=4?robustVP(hC.map(seg2line),4):null;
+        const hOK=rh&&rh.count>=4&&rh.count/rh.total>=0.5;
+        if(vOK){
+          const vV=rv.v, dist=Math.hypot(vV.x-W/2,vV.y-H/2);
+          // 距离阈值放宽到 4 倍宽：远处灭点=轻微倾斜（交给死区），过近/错估的才拒绝
+          if(dist<=4*Math.max(W,H)){
+            const Rv=RfromVPs(vV,null,K), anv=Rv?anglesFromR(Rv):null;
+            let anBest=anv, useH=false;
+            if(hOK){
+              const Rj=RfromVPs(vV,rh.v,K), anj=Rj?anglesFromR(Rj):null;
+              if(anj&&anv){
+                // 两种解法取“旋转量更小者”：更保守，抗水平灭点被透视横线误估
+                const mv=Math.hypot(anv.pitch,anv.yaw,anv.roll), mj=Math.hypot(anj.pitch,anj.yaw,anj.roll);
+                if(mj<mv){anBest=anj;useH=true;}
+              }else if(anj){anBest=anj;useH=true;}
+            }
+            const an=anBest;
+            if(an){
+              if(Math.abs(an.roll)<=1.2)an.roll=0;   // 近级摆正无需旋转
+              if(Math.abs(an.pitch)<=45&&Math.abs(an.yaw)<=35&&Math.abs(an.roll)<=45){
+                setParams({pitch:an.pitch,yaw:an.yaw,roll:an.roll});
+                setStatus(`自动校正完成（透视直立）：${useH?'竖+横':'竖线'}共识 ${Math.round(rv.count/rv.total*100)}%，姿态 pitch ${an.pitch.toFixed(1)}° / yaw ${an.yaw.toFixed(1)}° / roll ${an.roll.toFixed(1)}°`,'ok');
+                applied=true;
+              }
+            }
+          }
+        }
+      }
+      // 路径B：竖线近平行（常见建筑）→ 稳定的 2D 旋转校正（不依赖灭点，永不崩）
+      if(!applied && vC.length>=4){
+        // 稳健滚转：滑窗找“主流方向”，对窗框/斜楼边等少量离群线不敏感（修：原用中位，易把近竖直图校歪 1°）
+        const rr=robustRoll(vDev);
+        if(!rr){
+          setStatus('竖线不足，无法估计旋转','warn');
+        }else if(rr.consensus<0.6){
+          setStatus(`竖线方向不一致（共识 ${Math.round(rr.consensus*100)}%），易被杂物干扰，建议画引导线或调参`,'warn');
+        }else if(Math.abs(rr.roll)<=1.2){
+          // 已接近竖直（≤1.2°）：直接归零，绝不瞎转（防近竖直图被“旋转 1 度”）
+          setParams({pitch:0,yaw:0,roll:0});
+          setStatus(`竖线已接近竖直（偏差 ${rr.roll.toFixed(2)}°），置信度 ${Math.round(rr.consensus*100)}%，无需校正`,'ok');
+          applied=true;
+        }else{
+          let roll=-rr.roll; if(roll>90)roll-=180; if(roll<-90)roll+=180;
+          setParams({pitch:0,yaw:0,roll:clamp(roll,-45,45)});
+          setStatus(`自动校正完成：竖线 ${vC.length} 条，偏差 ${rr.roll.toFixed(2)}°，置信度 ${Math.round(rr.consensus*100)}%`,'ok'); applied=true;
+        }
+      }
+      // 仅横线
+      if(!applied && hC.length>=4){
+        const consH=hDev.filter(d=>Math.abs(d-hMed)<=0.8).length/hDev.length;
+        if(Math.abs(hMed)<=0.3){
+          setParams({pitch:0,yaw:0,roll:0});
+          setStatus(`横线已接近水平（偏差 ${hMed.toFixed(2)}°），置信度 ${Math.round(consH*100)}%，无需校正`,'ok'); applied=true;
+        }else if(consH<0.5){
+          setStatus('横线方向不一致（可能被干扰），建议画引导线','warn');
+        }else{
+          let roll=-hMed; if(roll>90)roll-=180; if(roll<-90)roll+=180;
+          setParams({pitch:0,yaw:0,roll:clamp(roll,-45,45)});
+          setStatus(`仅水平校正（无可靠竖线），置信度 ${Math.round(consH*100)}%`,'ok'); applied=true;
+        }
+      }
+      if(!applied){setStatus('未找到可靠竖直/水平线，请手动画引导线','warn');}
+      
+      drawEdit();renderPreview();
+    }catch(e){setStatus('自动校正出错：'+e.message,'err');}
+    hideLoading();
+  },30);
+}
+
+/* ================= 引导线 → 校正 ================= */
+function applyGuided(){
+  if(!cvReady||!previewCanvas)return;
+  const fov=parseFloat(els.sFov.value);
+  const vVs=vLines.length>=2?lsVP(vLines.map(seg2line)):(vLines.length===1?null:null);
+  const hVs=hLines.length>=2?lsVP(hLines.map(seg2line)):null;
+  const K=Kof(W,H,fov);
+  let R=null,msg='';
+  if(vVs&&hVs){
+    R=RfromVPs(vVs,hVs,K);
+    msg=`按引导线校正：竖直${vLines.length}条 + 水平${hLines.length}条`;
+  }else if(vVs){
+    R=RfromVPs(vVs,null,K);
+    msg=`按竖直引导线校正（${vLines.length}条）；如需水平校正请画水平线`;
+  }else if(hVs){
+    R=RfromSingleH(hVs,K);
+    msg=`按水平引导线校正（${hLines.length}条）；如需垂直校正请画竖直线`;
+  }else if(vLines.length===1){
+    // 单条竖线：仅旋转摆正
+    const L=seg2line(vLines[0]); let a=Math.atan2(L.dy,L.dx)*R2D;
+    let roll=-(a-90); if(roll>90)roll-=180; if(roll<-90)roll+=180;
+    setParams({roll}); msg='单条竖线：仅旋转摆正'; drawEdit();renderPreview();
+    setStatus(msg,'ok'); return;
+  }else if(hLines.length===1){
+    const L=seg2line(hLines[0]); let a=Math.atan2(L.dy,L.dx)*R2D;
+    let roll=-a; if(roll>90)roll-=180; if(roll<-90)roll+=180;
+    setParams({roll}); msg='单条水平线：仅旋转摆正'; drawEdit();renderPreview();
+    setStatus(msg,'ok'); return;
+  }else{
+    
+    setStatus('再画一条同类引导线即可计算（竖直/水平各≥2条最佳）','warn');
+    drawEdit();return;
+  }
+  if(R){
+    const ang=anglesFromR(R);
+    setParams({pitch:ang.pitch,yaw:ang.yaw,roll:ang.roll});
+    
+    setStatus(msg,'ok');
+    drawEdit();renderPreview();
+  }
+}
+
+/* ================= 视图切换（校正结果 / 原图引导线） ================= */
+function setView(v){
+  view=v;
+  els.btnViewResult.classList.toggle('active',v==='result');
+  els.btnViewOrig.classList.toggle('active',v==='orig');
+  els.boxResult.classList.toggle('hidden',v!=='result');
+  els.boxEdit.classList.toggle('hidden',v!=='orig');
+  if(v==='orig')drawEdit(); else renderPreview();
+}
+/* ================= 画线交互 ================= */
+function setMode(m){
+  mode=m;
+  els.btnModeV.classList.toggle('active',m==='v');
+  els.btnModeH.classList.toggle('active',m==='h');
+  els.edit.classList.toggle('drawing',m==='v'||m==='h');
+  if(m==='v'||m==='h')setView('orig');   // 画线时切到原图视图
+}
+function getPos(e){const r=els.edit.getBoundingClientRect();
+  const cx=(e.touches?e.touches[0].clientX:e.clientX)-r.left, cy=(e.touches?e.touches[0].clientY:e.clientY)-r.top;
+  return{x:cx*(els.edit.width/r.width)/editScale, y:cy*(els.edit.height/r.height)/editScale};}
+function startDraw(e){
+  if(mode!=='v'&&mode!=='h')return; e.preventDefault();
+  const p=getPos(e); drawing=true; curLine={x1:p.x,y1:p.y,x2:p.x,y2:p.y};
+}
+function moveDraw(e){
+  if(!drawing||!curLine)return; e.preventDefault();
+  const p=getPos(e); curLine.x2=p.x;curLine.y2=p.y; drawEdit();
+}
+function endDraw(){
+  if(!drawing||!curLine)return; drawing=false;
+  const L=curLine; curLine=null;
+  if(Math.hypot(L.x2-L.x1,L.y2-L.y1)<W*0.03){drawEdit();return;} // 太短忽略
+  if(mode==='v')vLines.push(L); else hLines.push(L);
+  applyGuided();
+}
+els.edit.addEventListener('mousedown',startDraw);
+window.addEventListener('mousemove',moveDraw);
+window.addEventListener('mouseup',endDraw);
+els.edit.addEventListener('touchstart',startDraw,{passive:false});
+els.edit.addEventListener('touchmove',moveDraw,{passive:false});
+els.edit.addEventListener('touchend',endDraw);
+
+/* ================= 导出（原图分辨率） ================= */
+function download(){
+  if(!origCanvas)return;
+  const r=computeH(); if(!r){setStatus('当前参数无法生成结果','warn');return;}
+  const k=origW/W;                        // 原图/预览 缩放
+  const Sk=[[k,0,0],[0,k,0],[0,0,1]], Ski=invert3(Sk);
+  const Ho=matmul(Sk,matmul(r.Hf,Ski));
+  const ow=Math.round(r.ow*k), oh=Math.round(r.oh*k);
+  const Hm=cv.matFromArray(3,3,cv.CV_64FC1,Ho.flat());
+  const src=cv.imread(origCanvas),dst=new cv.Mat();
+  cv.warpPerspective(src,dst,Hm,new cv.Size(ow,oh),interpGood(),cv.BORDER_CONSTANT,new cv.Scalar());
+  const crop=autoCrop(dst); dst.delete();
+  const fw=crop.mat.cols, fh=crop.mat.rows;
+  cv.imshow(els.result,crop.mat);
+  const a=document.createElement('a');a.download='corrected.png';a.href=els.result.toDataURL('image/png');a.click();
+  crop.mat.delete();Hm.delete();src.delete();
+  setStatus(crop.cropped?`已导出 ${fw}×${fh} 成品（LANCZOS4 插值 · 已自动裁剪黑边）`:`已导出 ${fw}×${fh} 成品（LANCZOS4 插值）`,'ok');
+}
+
+/* ================= 事件绑定 ================= */
+els.btnUpload.addEventListener('click',()=>els.file.click());
+els.drop.addEventListener('click',()=>els.file.click());
+els.file.addEventListener('change',e=>{if(e.target.files[0])loadImageFile(e.target.files[0]);});
+els.btnAuto.addEventListener('click',autoCorrect);
+els.btnDownload.addEventListener('click',download);
+els.chkLines.addEventListener('change',drawEdit);
+els.btnModeV.addEventListener('click',()=>setMode(mode==='v'?'none':'v'));
+els.btnModeH.addEventListener('click',()=>setMode(mode==='h'?'none':'h'));
+els.btnUndo.addEventListener('click',()=>{
+  if(mode==='h'){ if(hLines.length)hLines.pop(); }
+  else if(mode==='v'){ if(vLines.length)vLines.pop(); }
+  else { if(hLines.length)hLines.pop(); else if(vLines.length)vLines.pop(); }
+  applyGuided();
+});
+els.btnClearLines.addEventListener('click',()=>{vLines=[];hLines=[];drawEdit();resetParams();renderPreview();setStatus('已清除引导线并重置参数','ok');});
+els.btnResetParams.addEventListener('click',()=>{resetParams();renderPreview();setStatus('参数已重置','ok');});
+els.btnViewResult.addEventListener('click',()=>setView('result'));
+els.btnViewOrig.addEventListener('click',()=>setView('orig'));
+function toggleParams(scroll){
+  const open=els.paramBody.classList.toggle('hidden');
+  els.paramToggle.textContent=open?'③ 校正参数微调 ▸':'③ 校正参数微调 ▾';
+  if(!open&&scroll)els.paramCard.scrollIntoView({behavior:'smooth',block:'center'});
+}
+els.paramToggle.addEventListener('click',()=>toggleParams(false));
+els.btnParams.addEventListener('click',()=>{
+  if(els.paramBody.classList.contains('hidden'))toggleParams(true);
+  else els.paramCard.scrollIntoView({behavior:'smooth',block:'center'});
+});
+[els.sPitch,els.sYaw,els.sRoll,els.sFov,els.sScale,els.sAspect].forEach(s=>{
+  s.addEventListener('input',()=>{syncParamLabels();scheduleWarp();});
+});
+['dragenter','dragover'].forEach(ev=>els.drop.addEventListener(ev,e=>{e.preventDefault();els.drop.classList.add('drag');}));
+['dragleave','drop'].forEach(ev=>els.drop.addEventListener(ev,e=>{e.preventDefault();els.drop.classList.remove('drag');}));
+els.drop.addEventListener('drop',e=>{if(e.dataTransfer.files[0])loadImageFile(e.dataTransfer.files[0]);});
+syncParamLabels();
+</script>
+</body>
+</html>

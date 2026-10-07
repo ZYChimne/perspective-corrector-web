@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>建筑透视自动校正</title>
+<style>
+  :root{
+    --bg:#0f1420; --panel:#1a2233; --panel-2:#222c42; --accent:#4f9dff;
+    --accent-2:#36d399; --danger:#ff6b6b; --text:#e7ecf5; --muted:#9aa6bd; --line:#2c3850;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    background:linear-gradient(160deg,#0c111c,#101725);color:var(--text);min-height:100vh;}
+  header{padding:22px 28px 10px;border-bottom:1px solid var(--line);}
+  header h1{margin:0;font-size:20px;letter-spacing:.5px;}
+  header p{margin:6px 0 0;color:var(--muted);font-size:13px;}
+  .wrap{padding:20px 28px 60px;max-width:1180px;margin:0 auto;}
+  .toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:18px;}
+  button{border:1px solid var(--line);background:var(--panel-2);color:var(--text);
+    padding:9px 16px;border-radius:9px;font-size:14px;cursor:pointer;transition:.15s;}
+  button:hover:not(:disabled){border-color:var(--accent);transform:translateY(-1px);}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#06101f;font-weight:600;}
+  button.primary:hover:not(:disabled){background:#6fb0ff;}
+  button.success{background:var(--accent-2);border-color:var(--accent-2);color:#062012;font-weight:600;}
+  button:disabled{opacity:.45;cursor:not-allowed;}
+  .chk{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:13px;user-select:none;cursor:pointer;}
+  .status{margin-left:auto;font-size:13px;color:var(--muted);background:var(--panel);
+    border:1px solid var(--line);padding:7px 12px;border-radius:8px;max-width:380px;}
+  .status.ok{color:var(--accent-2);border-color:#1f5a44;}
+  .status.warn{color:#ffd166;border-color:#5a4a1f;}
+  .status.err{color:var(--danger);border-color:#5a2222;}
+  .drop{border:2px dashed var(--line);border-radius:14px;padding:40px 20px;text-align:center;
+    color:var(--muted);background:var(--panel);cursor:pointer;transition:.15s;}
+  .drop.drag{border-color:var(--accent);background:#16243c;color:var(--text);}
+  .drop strong{color:var(--text);}
+  .stage{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:18px;}
+  @media(max-width:860px){.stage{grid-template-columns:1fr;}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;}
+  .card h3{margin:0 0 10px;font-size:14px;color:var(--muted);font-weight:600;}
+  .canvas-box{position:relative;background:repeating-conic-gradient(#1b2333 0% 25%,#161d2b 0% 50%) 50%/22px 22px;
+    border-radius:10px;overflow:hidden;display:flex;align-items:center;justify-content:center;min-height:200px;}
+  canvas{display:block;max-width:100%;touch-action:none;}
+  #editCanvas{cursor:crosshair;}
+  .hint{margin-top:10px;font-size:12px;color:var(--muted);line-height:1.6;}
+  .hint b{color:var(--accent);}
+  .hidden{display:none!important;}
+  .loading{position:fixed;inset:0;background:rgba(8,12,20,.78);display:flex;align-items:center;
+    justify-content:center;flex-direction:column;gap:14px;z-index:50;color:var(--text);}
+  .spinner{width:42px;height:42px;border-radius:50%;border:4px solid var(--line);
+    border-top-color:var(--accent);animation:spin 1s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .badge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;background:#23304a;color:var(--muted);margin-left:6px;}
+</style>
+</head>
+<body>
+<header>
+  <h1>建筑透视自动校正 <span class="badge">灭点 · 单应矩阵</span></h1>
+  <p>自动检测画面中的竖直/水平线条，估计灭点并构造单应矩阵把大楼“拉直”（竖线竖直、横线水平）；不满意时用辅助线拖四角手动精修，全程实时预览。</p>
+</header>
+
+<div class="wrap">
+  <div class="toolbar">
+    <button id="btnUpload" class="primary">📁 上传图片</button>
+    <button id="btnAuto" disabled>✨ 自动校正</button>
+    <label class="chk"><input id="chkLines" type="checkbox" /> 显示检测线</label>
+    <button id="btnReset" disabled>↺ 重置四角</button>
+    <button id="btnDownload" class="success" disabled>⬇ 下载结果</button>
+    <span id="status" class="status">请先上传一张图片</span>
+    <input id="file" type="file" accept="image/*" class="hidden" />
+  </div>
+
+  <div id="drop" class="drop">
+    把图片拖到这里，或 <strong>点击选择文件</strong><br />
+    <span style="font-size:12px">适合建筑 / 风光 / 合影等存在“仰拍歪斜、竖线汇聚”的画面</span>
+  </div>
+
+  <div id="stage" class="stage hidden">
+    <div class="card">
+      <h3>原图 · 拖拽四角调节透视 <span id="modeTag" class="badge">可手动</span></h3>
+      <div class="canvas-box"><canvas id="editCanvas"></canvas></div>
+      <div class="hint">
+        自动校正会用<b>蓝色虚线框</b>标出选取区域并定位灭点；若不满意，直接<b>拖动四个角点</b>微调透视，
+        右侧实时预览。也可勾选“显示检测线”查看算法识别到的建筑边缘。
+      </div>
+    </div>
+    <div class="card">
+      <h3>校正结果（实时预览）</h3>
+      <div class="canvas-box"><canvas id="resultCanvas"></canvas></div>
+      <div class="hint">满意后点击 <b>下载结果</b> 保存原图分辨率成品；可再次 <b>自动校正</b> 重新识别。</div>
+    </div>
+  </div>
+</div>
+
+<div id="loading" class="loading hidden">
+  <div class="spinner"></div>
+  <div id="loadingText">正在加载图像处理引擎…</div>
+</div>
+
+<script>
+/* ============ 全局状态 ============ */
+let cvReady=false;
+let previewCanvas=null, W=0, H=0;     // 预览图(≤1000)及尺寸，所有交互基于此坐标
+let origCanvas=null, origW=0, origH=0;// 原图全分辨率，仅导出时套用
+let activeCorners=null;               // 4个源点(预览坐标)，手动/自动共用
+let lastSegs=[];                      // 最近一次检测到的线段(用于叠加)
+let draggingIdx=-1, editScale=1, warpScheduled=false;
+const MAX_PREVIEW=1000;              // 预览最长边上限 → 交互流畅、大图不卡
+
+const els={
+  file:document.getElementById('file'), btnUpload:document.getElementById('btnUpload'),
+  btnAuto:document.getElementById('btnAuto'), btnReset:document.getElementById('btnReset'),
+  btnDownload:document.getElementById('btnDownload'), chkLines:document.getElementById('chkLines'),
+  drop:document.getElementById('drop'), stage:document.getElementById('stage'),
+  edit:document.getElementById('editCanvas'), result:document.getElementById('resultCanvas'),
+  status:document.getElementById('status'), loading:document.getElementById('loading'),
+  loadingText:document.getElementById('loadingText'), modeTag:document.getElementById('modeTag'),
+};
+const setStatus=(m,k)=>{els.status.textContent=m;els.status.className='status'+(k?(' '+k):'');};
+const showLoading=t=>{els.loadingText.textContent=t;els.loading.classList.remove('hidden');};
+const hideLoading=()=>els.loading.classList.add('hidden');
+
+/* ============ OpenCV 加载 ============ */
+function onCvReady(){cvReady=true;setStatus('引擎就绪，可上传图片','ok');}
+(function loadOpenCV(){
+  const waitReady=()=>{
+    const t=setInterval(()=>{ if(cv&&cv.getPerspectiveTransform){clearInterval(t);onCvReady();hideLoading();} },150);
+    setTimeout(()=>{ if(!cvReady){clearInterval(t);hideLoading();setStatus('引擎加载较慢，请刷新页面','warn');} },20000);
+  };
+  const loadFrom=(src,onErr)=>{
+    showLoading('正在加载图像处理引擎…');
+    const s=document.createElement('script'); s.src=src;
+    s.onload=waitReady;
+    s.onerror=()=>{ if(onErr) onErr(); else {hideLoading();setStatus('无法加载 OpenCV，请检查网络','err');} };
+    document.head.appendChild(s);
+  };
+  // 优先本地 opencv.js(已内联 wasm，可离线/部署)，失败回退官方 CDN
+  loadFrom('https://docs.opencv.org/4.x/opencv.js', null);
+})();
+
+/* ============ 纯 JS 矩阵/几何工具 ============ */
+const fitDims=(w,h,mw,mh)=>{const r=Math.min(mw/w,mh/h,1);return{w:Math.round(w*r),h:Math.round(h*r)};};
+function cross3(v1,v2){return[v1[1]*v2[2]-v1[2]*v2[1],v1[2]*v2[0]-v1[0]*v2[2],v1[0]*v2[1]-v1[1]*v2[0]];}
+function mul3(A,B){const C=[[0,0,0],[0,0,0],[0,0,0]];for(let i=0;i<3;i++)for(let j=0;j<3;j++)for(let k=0;k<3;k++)C[i][j]+=A[i][k]*B[k][j];return C;}
+function applyH(H,x,y){const u=H[0][0]*x+H[0][1]*y+H[0][2],v=H[1][0]*x+H[1][1]*y+H[1][2],w=H[2][0]*x+H[2][1]*y+H[2][2];return[u/w,v/w];}
+function norm2(v){const m=Math.hypot(v[0],v[1])||1;return[v[0]/m,v[1]/m];}
+function invert3(m){
+  const a=m[0][0],b=m[0][1],c=m[0][2],d=m[1][0],e=m[1][1],f=m[1][2],g=m[2][0],h=m[2][1],i=m[2][2];
+  const A=e*i-f*h,B=-(d*i-f*g),C=d*h-e*g,det=a*A+b*B+c*C;
+  if(Math.abs(det)<1e-12)return null;const id=1/det;
+  return[[A*id,(c*h-b*i)*id,(b*f-c*e)*id],[B*id,(a*i-c*g)*id,(c*d-a*f)*id],[C*id,(b*g-a*h)*id,(a*e-b*d)*id]];
+}
+// 把无序四点排为 左上、右上、右下、左下
+function orderPoints(p){
+  const s=p.map(q=>q.x+q.y).sort((a,b)=>a-b), d=p.map(q=>q.x-q.y).sort((a,b)=>a-b);
+  return[ p.find(q=>q.x+q.y===s[0]), p.find(q=>q.x-q.y===d[3]),
+          p.find(q=>q.x+q.y===s[3]), p.find(q=>q.x-q.y===d[0]) ];
+}
+function destSize(c){
+  const wT=Math.hypot(c[1].x-c[0].x,c[1].y-c[0].y), wB=Math.hypot(c[3].x-c[2].x,c[3].y-c[2].y);
+  const hL=Math.hypot(c[3].x-c[0].x,c[3].y-c[0].y), hR=Math.hypot(c[2].x-c[1].x,c[2].y-c[1].y);
+  return{w:Math.round(Math.max(wT,wB)),h:Math.round(Math.max(hL,hR))};
+}
+// 灭点估计：最小化 Σ(到各直线距离²)
+function bestFitPoint(lines){
+  let A00=0,A01=0,A11=0,B0=0,B1=0;
+  for(const{a,b,c}of lines){A00+=a*a;A01+=a*b;A11+=b*b;B0+=-a*c;B1+=-b*c;}
+  const det=A00*A11-A01*A01;if(Math.abs(det)<1e-9)return null;
+  return{x:(A11*B0-A01*B1)/det,y:(A00*B1-A01*B0)/det};
+}
+function vpFromSegs(segs){
+  const lines=segs.map(([x1,y1,x2,y2])=>{const dx=x2-x1,dy=y2-y1,L=Math.hypot(dx,dy)||1;
+    const a=-dy/L,b=dx/L;return{a,b,c:-(a*x1+b*y1)};});
+  return bestFitPoint(lines);
+}
+
+/* ============ 线段检测（LSD 优先，Hough 兜底） ============ */
+function detectLines(){
+  const src=cv.imread(previewCanvas);
+  const gray=new cv.Mat(), blur=new cv.Mat(), edges=new cv.Mat();
+  cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY);
+  cv.GaussianBlur(gray,blur,new cv.Size(5,5),0);
+  cv.Canny(blur,edges,50,150);
+  let segs=[];
+  // 1) LSD
+  try{
+    const lsd=cv.createLineSegmentDetector(0,0,0,0,0,1.0);
+    const lines=new cv.Mat();lsd.detect(blur,lines);
+    if(lines.rows>0&&lines.cols>0){
+      const d=lines.data32F,n=lines.rows*lines.cols;
+      for(let i=0;i<n;i++){const x1=d[i*4],y1=d[i*4+1],x2=d[i*4+2],y2=d[i*4+3];
+        if(Math.hypot(x2-x1,y2-y1)>W*0.04)segs.push([x1,y1,x2,y2]);}
+    }
+    lines.delete();lsd.delete();
+  }catch(e){segs=[];}
+  // 2) Hough 兜底
+  if(segs.length<8){
+    try{
+      const lines=new cv.Mat();
+      cv.HoughLinesP(edges,lines,1,Math.PI/180,Math.round(H*0.22),W*0.12,W*0.04);
+      const d=lines.data32S,n=lines.rows*lines.cols;
+      for(let i=0;i<n;i++){const x1=d[i*4],y1=d[i*4+1],x2=d[i*4+2],y2=d[i*4+3];
+        if(Math.hypot(x2-x1,y2-y1)>W*0.04)segs.push([x1,y1,x2,y2]);}
+      lines.delete();
+    }catch(e){}
+  }
+  src.delete();gray.delete();blur.delete();edges.delete();
+  return segs;
+}
+function classifySegs(segs){
+  const v=[],h=[];
+  for(const[x1,y1,x2,y2]of segs){
+    const ang=Math.abs(Math.atan2(y2-y1,x2-x1)*180/Math.PI);
+    if(ang>=55&&ang<=125)v.push([x1,y1,x2,y2]);
+    else if(ang<=35||ang>=145)h.push([x1,y1,x2,y2]);
+  }
+  return{v,h};
+}
+// 构造建筑直立单应：竖线→竖直、横线→水平
+function buildUprightH(vSegs,hSegs){
+  let vV=vpFromSegs(vSegs), hH=vpFromSegs(hSegs);
+  const hasV=vV&&vSegs.length>=2, hasH=hH&&hSegs.length>=2;
+  if(!hasV&&!hasH)return null;
+  const vVh=hasV?[vV.x,vV.y,1]:[0,1,0];
+  const hHh=hasH?[hH.x,hH.y,1]:[1,0,0];
+  const l=cross3(vVh,hHh);
+  const Hrect=[[1,0,0],[0,1,0],[l[0],l[1],l[2]]];
+  const dv=hasV?norm2([vV.x,vV.y]):[0,1];
+  const dh=hasH?norm2([hH.x,hH.y]):[1,0];
+  const M=[[dv[0],dh[0]],[dv[1],dh[1]]], det=M[0][0]*M[1][1]-M[0][1]*M[1][0];
+  if(Math.abs(det)<1e-9)return null;
+  const inv=[[M[1][1]/det,-M[0][1]/det],[-M[1][0]/det,M[0][0]/det]];
+  const A=[[inv[1][0],inv[1][1]],[inv[0][0],inv[0][1]]]; // [[0,1],[1,0]]·inv
+  const Haff=[[A[0][0],A[0][1],0],[A[1][0],A[1][1],0],[0,0,1]];
+  return mul3(Haff,Hrect);
+}
+
+/* ============ 透视变换（基于 activeCorners） ============ */
+function warpPreview(){
+  if(!cvReady||!previewCanvas||!activeCorners)return;
+  const o=orderPoints(activeCorners), ds=destSize(o);
+  if(ds.w<2||ds.h<2)return;
+  const src=cv.imread(previewCanvas), dst=new cv.Mat();
+  const sT=cv.matFromArray(4,1,cv.CV_32FC2,[o[0].x,o[0].y,o[1].x,o[1].y,o[2].x,o[2].y,o[3].x,o[3].y]);
+  const dT=cv.matFromArray(4,1,cv.CV_32FC2,[0,0,ds.w,0,ds.w,ds.h,0,ds.h]);
+  let M;try{M=cv.getPerspectiveTransform(sT,dT);}catch(e){sT.delete();dT.delete();src.delete();return;}
+  cv.warpPerspective(src,dst,M,new cv.Size(ds.w,ds.h),cv.INTER_LINEAR,cv.BORDER_CONSTANT,new cv.Scalar());
+  cv.imshow(els.result,dst);
+  sT.delete();dT.delete();src.delete();dst.delete();M.delete();
+}
+function scheduleWarp(){if(warpScheduled)return;warpScheduled=true;
+  requestAnimationFrame(()=>{warpScheduled=false;warpPreview();});}
+
+/* ============ 编辑画布渲染 ============ */
+function drawEdit(){
+  const disp=fitDims(W,H,600,540);
+  els.edit.width=disp.w;els.edit.height=disp.h;editScale=disp.w/W;
+  const ctx=els.edit.getContext('2d');ctx.clearRect(0,0,disp.w,disp.h);
+  ctx.drawImage(previewCanvas,0,0,disp.w,disp.h);
+  // 检测线叠加
+  if(els.chkLines.checked&&lastSegs.length){
+    ctx.lineWidth=1;ctx.strokeStyle='rgba(255,209,102,0.55)';
+    for(const[x1,y1,x2,y2]of lastSegs){ctx.beginPath();
+      ctx.moveTo(x1*editScale,y1*editScale);ctx.lineTo(x2*editScale,y2*editScale);ctx.stroke();}
+  }
+  if(activeCorners){
+    const p=activeCorners.map(c=>({x:c.x*editScale,y:c.y*editScale}));
+    ctx.lineWidth=2;ctx.strokeStyle='rgba(79,157,255,0.95)';ctx.setLineDash([6,4]);
+    ctx.beginPath();ctx.moveTo(p[0].x,p[0].y);for(let i=1;i<4;i++)ctx.lineTo(p[i].x,p[i].y);ctx.closePath();ctx.stroke();
+    ctx.setLineDash([]);
+    const colors=['#4f9dff','#36d399','#ffd166','#ff6b6b'];
+    p.forEach((pt,i)=>{ctx.beginPath();ctx.arc(pt.x,pt.y,8,0,Math.PI*2);ctx.fillStyle=colors[i];ctx.fill();
+      ctx.lineWidth=2;ctx.strokeStyle='#fff';ctx.stroke();});
+  }
+}
+
+/* ============ 载入图片 ============ */
+function loadImageFile(file){
+  if(!file||!file.type.startsWith('image/')){setStatus('请选择图片文件','warn');return;}
+  showLoading('正在读取图片…');
+  const img=new Image();
+  img.onload=()=>{
+    origW=img.naturalWidth;origH=img.naturalHeight;
+    origCanvas=document.createElement('canvas');origCanvas.width=origW;origCanvas.height=origH;
+    origCanvas.getContext('2d').drawImage(img,0,0,origW,origH);
+    const dim=fitDims(origW,origH,MAX_PREVIEW,MAX_PREVIEW);
+    W=dim.w;H=dim.h;
+    previewCanvas=document.createElement('canvas');previewCanvas.width=W;previewCanvas.height=H;
+    previewCanvas.getContext('2d').drawImage(img,0,0,W,H);
+    activeCorners=[{x:0,y:0},{x:W,y:0},{x:W,y:H},{x:0,y:H}];
+    els.stage.classList.remove('hidden');els.drop.classList.add('hidden');
+    els.btnAuto.disabled=!cvReady;els.btnReset.disabled=false;els.btnDownload.disabled=false;
+    els.modeTag.textContent='待校正';lastSegs=[];
+    drawEdit();warpPreview();hideLoading();
+    setStatus('图片已载入，点击「自动校正」或拖角手动调节','ok');
+  };
+  img.onerror=()=>{hideLoading();setStatus('图片读取失败','err');};
+  img.src=URL.createObjectURL(file);
+}
+
+/* ============ 自动校正 ============ */
+function autoCorrect(){
+  if(!cvReady||!previewCanvas){setStatus('引擎未就绪','warn');return;}
+  showLoading('正在检测线条与灭点…');
+  setTimeout(()=>{
+    try{
+      const segs=detectLines();lastSegs=segs;
+      const {v,h}=classifySegs(segs);
+      const Hm=buildUprightH(v,h);
+      if(!Hm){setStatus('检测到线条不足，未做校正，建议手动拖角','warn');drawEdit();warpPreview();hideLoading();return;}
+      // 计算输出尺寸并平移到正坐标
+      const cs=[[0,0],[W,0],[W,H],[0,H]].map(([x,y])=>applyH(Hm,x,y));
+      const xs=cs.map(p=>p[0]),ys=cs.map(p=>p[1]);
+      const minx=Math.min(...xs),miny=Math.min(...ys),maxx=Math.max(...xs),maxy=Math.max(...ys);
+      const ow=Math.round(maxx-minx),oh=Math.round(maxy-miny);
+      if(ow<10||oh<10||ow>W*6||oh>H*6){setStatus('校正结果异常，未应用，请手动微调','warn');drawEdit();warpPreview();hideLoading();return;}
+      const T=[[1,0,-minx],[0,1,-miny],[0,0,1]], Hf=mul3(T,Hm);
+      // 在原图画布上执行一次全分辨率校正并显示预览(用缩放后的 Hf)
+      applyHToCanvas(previewCanvas,Hf,ow,oh,els.result);
+      // 反算手动四角(使手动模式从自动结果出发)
+      const inv=invert3(Hf);
+      if(inv){
+        activeCorners=orderPoints([[0,0],[ow,0],[ow,oh],[0,oh]].map(([x,y])=>{const p=applyH(inv,x,y);return{x:p[0],y:p[1]};}));
+      }
+      els.modeTag.textContent='自动+可微调';drawEdit();
+      setStatus(`自动校正完成：竖线${v.length} 横线${h.length}，竖线已拉直`,'ok');
+    }catch(e){setStatus('自动校正出错：'+e.message,'err');}
+    hideLoading();
+  },30);
+}
+
+// 用 3x3 单应矩阵对画布做变换并写入目标画布
+function applyHToCanvas(srcCanvas,H,ow,oh,dstCanvas){
+  const Hm=cv.matFromArray(3,3,cv.CV_64FC1,H.flat());
+  const src=cv.imread(srcCanvas),dst=new cv.Mat();
+  cv.warpPerspective(src,dst,Hm,new cv.Size(ow,oh),cv.INTER_LINEAR,cv.BORDER_CONSTANT,new cv.Scalar());
+  cv.imshow(dstCanvas,dst);
+  Hm.delete();src.delete();dst.delete();
+}
+
+/* ============ 拖拽 ============ */
+function getPos(e){const r=els.edit.getBoundingClientRect();
+  const cx=(e.touches?e.touches[0].clientX:e.clientX)-r.left, cy=(e.touches?e.touches[0].clientY:e.clientY)-r.top;
+  return{x:cx*(els.edit.width/r.width),y:cy*(els.edit.height/r.height)};}
+function nearestCorner(mx,my){let idx=-1,best=18;
+  activeCorners.forEach((c,i)=>{const d=Math.hypot(c.x*editScale-mx,c.y*editScale-my);if(d<best){best=d;idx=i;}});return idx;}
+function startDrag(e){if(!activeCorners)return;const p=getPos(e);draggingIdx=nearestCorner(p.x,p.y);}
+function moveDrag(e){if(draggingIdx<0||!activeCorners)return;e.preventDefault();
+  const p=getPos(e);let sx=Math.max(0,Math.min(W,p.x/editScale)),sy=Math.max(0,Math.min(H,p.y/editScale));
+  activeCorners[draggingIdx]={x:sx,y:sy};drawEdit();scheduleWarp();}
+function endDrag(){draggingIdx=-1;}
+els.edit.addEventListener('mousedown',startDrag);
+window.addEventListener('mousemove',moveDrag);window.addEventListener('mouseup',endDrag);
+els.edit.addEventListener('touchstart',startDrag,{passive:false});
+els.edit.addEventListener('touchmove',moveDrag,{passive:false});
+els.edit.addEventListener('touchend',endDrag);
+
+/* ============ 导出（全分辨率） ============ */
+function download(){
+  if(!origCanvas||!activeCorners)return;
+  const s=origW/W;
+  const o=orderPoints(activeCorners.map(c=>({x:c.x*s,y:c.y*s}))), ds=destSize(o);
+  if(ds.w<2||ds.h<2)return;
+  const src=cv.imread(origCanvas),dst=new cv.Mat();
+  const sT=cv.matFromArray(4,1,cv.CV_32FC2,[o[0].x,o[0].y,o[1].x,o[1].y,o[2].x,o[2].y,o[3].x,o[3].y]);
+  const dT=cv.matFromArray(4,1,cv.CV_32FC2,[0,0,ds.w,0,ds.w,ds.h,0,ds.h]);
+  const M=cv.getPerspectiveTransform(sT,dT);
+  cv.warpPerspective(src,dst,M,new cv.Size(ds.w,ds.h),cv.INTER_LINEAR,cv.BORDER_CONSTANT,new cv.Scalar());
+  cv.imshow(els.result,dst); // 同步预览
+  const a=document.createElement('a');a.download='corrected.png';a.href=els.result.toDataURL('image/png');a.click();
+  sT.delete();dT.delete();src.delete();dst.delete();M.delete();
+}
+
+/* ============ 事件 ============ */
+els.btnUpload.addEventListener('click',()=>els.file.click());
+els.drop.addEventListener('click',()=>els.file.click());
+els.file.addEventListener('change',e=>{if(e.target.files[0])loadImageFile(e.target.files[0]);});
+els.btnAuto.addEventListener('click',autoCorrect);
+els.btnDownload.addEventListener('click',download);
+els.chkLines.addEventListener('change',drawEdit);
+els.btnReset.addEventListener('click',()=>{
+  activeCorners=[{x:0,y:0},{x:W,y:0},{x:W,y:H},{x:0,y:H}];
+  els.modeTag.textContent='待校正';drawEdit();warpPreview();
+  setStatus('已重置为整图四角，可重新自动校正或手动微调','ok');});
+['dragenter','dragover'].forEach(ev=>els.drop.addEventListener(ev,e=>{e.preventDefault();els.drop.classList.add('drag');}));
+['dragleave','drop'].forEach(ev=>els.drop.addEventListener(ev,e=>{e.preventDefault();els.drop.classList.remove('drag');}));
+els.drop.addEventListener('drop',e=>{if(e.dataTransfer.files[0])loadImageFile(e.dataTransfer.files[0]);});
+</script>
+</body>
+</html>
